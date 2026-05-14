@@ -12,6 +12,13 @@ python3 -m http.server 7358 --bind 0.0.0.0
 
 Then open http://127.0.0.1:7358/.
 
+You can also deep-link to a PR:
+
+```text
+https://neeraj-pilot.github.io/preview-icons-pr/?pr=10426
+https://neeraj-pilot.github.io/preview-icons-pr/?pr=https%3A%2F%2Fgithub.com%2Fente-io%2Fente%2Fpull%2F10426
+```
+
 ## Test
 
 ```sh

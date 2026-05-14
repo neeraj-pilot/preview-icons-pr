@@ -3,8 +3,9 @@ import {
   adaptiveAuthIconColor,
   createGitHubPreviewService,
 } from './preview-service.mjs';
+import { prInputFromSearch, urlWithPrInput } from './url-state.mjs';
 
-const initialPr = 'https://github.com/ente-io/ente/pull/10426';
+const defaultPr = 'https://github.com/ente-io/ente/pull/10426';
 const service = createGitHubPreviewService();
 let loadRun = 0;
 
@@ -13,17 +14,24 @@ const input = document.querySelector('[data-pr-input]');
 const loadButton = document.querySelector('[data-load]');
 const output = document.querySelector('[data-output]');
 
-input.value = initialPr;
+input.value = prInputFromSearch(window.location.search, defaultPr);
 form.addEventListener('submit', (event) => {
   event.preventDefault();
+  void loadPreview({ syncUrl: true });
+});
+window.addEventListener('popstate', () => {
+  input.value = prInputFromSearch(window.location.search, defaultPr);
   void loadPreview();
 });
 
 void loadPreview();
 
-async function loadPreview() {
+async function loadPreview({ syncUrl = false } = {}) {
   const value = input.value.trim();
   if (!value) return;
+  if (syncUrl) {
+    window.history.replaceState(null, '', urlWithPrInput(window.location.href, value));
+  }
 
   const runId = ++loadRun;
   loadButton.disabled = true;

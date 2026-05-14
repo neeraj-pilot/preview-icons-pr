@@ -13,6 +13,7 @@ import {
   normalizeSimpleIconName,
   parsePrReference,
 } from './preview-service.mjs';
+import { prInputFromSearch, urlWithPrInput } from './url-state.mjs';
 
 test('parses GitHub PR references', () => {
   assert.equal(parsePrReference('10426').owner, 'ente-io');
@@ -20,6 +21,19 @@ test('parses GitHub PR references', () => {
   assert.equal(
     parsePrReference('https://github.com/ente-io/ente/pull/10426').number,
     10426,
+  );
+});
+
+test('reads and writes PR input in URL state', () => {
+  assert.equal(prInputFromSearch('?pr=10426', 'fallback'), '10426');
+  assert.equal(
+    prInputFromSearch('?pr=https%3A%2F%2Fgithub.com%2Fente-io%2Fente%2Fpull%2F10426', 'fallback'),
+    'https://github.com/ente-io/ente/pull/10426',
+  );
+  assert.equal(prInputFromSearch('', 'fallback'), 'fallback');
+  assert.equal(
+    urlWithPrInput('https://neeraj-pilot.github.io/preview-icons-pr/', '10426'),
+    'https://neeraj-pilot.github.io/preview-icons-pr/?pr=10426',
   );
 });
 
