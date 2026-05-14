@@ -1,0 +1,11 @@
+{
+  "name": "ente-auth-icon-pr-preview",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check app.mjs && node --check preview-service.mjs",
+    "test": "node --test preview-service.test.mjs",
+    "verify": "npm run check && npm test"
+  }
+}

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Native auth icon PR preview</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <form class="search-form" data-form>
+        <div class="app-mark" aria-hidden="true"></div>
+        <label class="field">
+          <span>GitHub PR URL or number</span>
+          <input
+            data-pr-input
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            type="text"
+          />
+        </label>
+        <button class="load-button" type="submit" data-load>Load</button>
+        <span class="copy-status" data-copy-status role="status" aria-live="polite"></span>
+      </form>
+    </header>
+    <main data-output></main>
+    <script type="module" src="./app.mjs"></script>
+  </body>
+</html>
