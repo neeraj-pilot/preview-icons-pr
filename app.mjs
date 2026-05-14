@@ -2,8 +2,8 @@ import {
   GitHubRateLimitError,
   adaptiveAuthIconColor,
   createGitHubPreviewService,
-} from './preview-service.mjs';
-import { prInputFromSearch, urlWithPrInput } from './url-state.mjs';
+} from './preview-service.mjs?v=20260514-no-default-pr';
+import { prInputFromSearch, urlWithPrInput } from './url-state.mjs?v=20260514-no-default-pr';
 
 const service = createGitHubPreviewService();
 let loadRun = 0;
@@ -13,13 +13,13 @@ const input = document.querySelector('[data-pr-input]');
 const loadButton = document.querySelector('[data-load]');
 const output = document.querySelector('[data-output]');
 
-input.value = prInputFromSearch(window.location.search);
+input.value = prInputFromSearch(window.location.search) || '';
 form.addEventListener('submit', (event) => {
   event.preventDefault();
   void loadPreview({ syncUrl: true });
 });
 window.addEventListener('popstate', () => {
-  input.value = prInputFromSearch(window.location.search);
+  input.value = prInputFromSearch(window.location.search) || '';
   void loadPreview();
 });
 
