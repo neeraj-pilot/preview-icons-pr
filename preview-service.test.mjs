@@ -25,15 +25,20 @@ test('parses GitHub PR references', () => {
 });
 
 test('reads and writes PR input in URL state', () => {
-  assert.equal(prInputFromSearch('?pr=10426', 'fallback'), '10426');
+  assert.equal(prInputFromSearch('?pr=10426'), '10426');
   assert.equal(
-    prInputFromSearch('?pr=https%3A%2F%2Fgithub.com%2Fente-io%2Fente%2Fpull%2F10426', 'fallback'),
+    prInputFromSearch('?pr=https%3A%2F%2Fgithub.com%2Fente-io%2Fente%2Fpull%2F10426'),
     'https://github.com/ente-io/ente/pull/10426',
   );
-  assert.equal(prInputFromSearch('', 'fallback'), 'fallback');
+  assert.equal(prInputFromSearch(''), '');
+  assert.equal(prInputFromSearch('?pr='), '');
   assert.equal(
     urlWithPrInput('https://neeraj-pilot.github.io/preview-icons-pr/', '10426'),
     'https://neeraj-pilot.github.io/preview-icons-pr/?pr=10426',
+  );
+  assert.equal(
+    urlWithPrInput('https://neeraj-pilot.github.io/preview-icons-pr/?pr=10426', ''),
+    'https://neeraj-pilot.github.io/preview-icons-pr/',
   );
 });
 

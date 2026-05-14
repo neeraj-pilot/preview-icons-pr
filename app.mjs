@@ -5,7 +5,6 @@ import {
 } from './preview-service.mjs';
 import { prInputFromSearch, urlWithPrInput } from './url-state.mjs';
 
-const defaultPr = 'https://github.com/ente-io/ente/pull/10426';
 const service = createGitHubPreviewService();
 let loadRun = 0;
 
@@ -14,13 +13,13 @@ const input = document.querySelector('[data-pr-input]');
 const loadButton = document.querySelector('[data-load]');
 const output = document.querySelector('[data-output]');
 
-input.value = prInputFromSearch(window.location.search, defaultPr);
+input.value = prInputFromSearch(window.location.search);
 form.addEventListener('submit', (event) => {
   event.preventDefault();
   void loadPreview({ syncUrl: true });
 });
 window.addEventListener('popstate', () => {
-  input.value = prInputFromSearch(window.location.search, defaultPr);
+  input.value = prInputFromSearch(window.location.search);
   void loadPreview();
 });
 
@@ -28,9 +27,14 @@ void loadPreview();
 
 async function loadPreview({ syncUrl = false } = {}) {
   const value = input.value.trim();
-  if (!value) return;
   if (syncUrl) {
     window.history.replaceState(null, '', urlWithPrInput(window.location.href, value));
+  }
+  if (!value) {
+    loadRun += 1;
+    loadButton.disabled = false;
+    renderEmpty();
+    return;
   }
 
   const runId = ++loadRun;
@@ -58,6 +62,14 @@ function renderState(state) {
     return;
   }
   renderResult(state);
+}
+
+function renderEmpty() {
+  output.replaceChildren(
+    el('section', { className: 'center-state' }, [
+      el('p', { className: 'muted' }, 'Enter a GitHub PR URL or number to load icon previews.'),
+    ]),
+  );
 }
 
 function renderLoading(label) {

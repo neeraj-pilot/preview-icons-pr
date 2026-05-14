@@ -1,6 +1,6 @@
-export function prInputFromSearch(search, fallback) {
+export function prInputFromSearch(search) {
   const value = new URLSearchParams(search).get('pr')?.trim();
-  return value ? value : fallback;
+  return value ? value : '';
 }
 
 export function urlWithPrInput(href, prInput) {

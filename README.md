@@ -12,7 +12,7 @@ python3 -m http.server 7358 --bind 0.0.0.0
 
 Then open http://127.0.0.1:7358/.
 
-You can also deep-link to a PR:
+Open the app with an empty URL to start from a blank input, or deep-link to a PR:
 
 ```text
 https://neeraj-pilot.github.io/preview-icons-pr/?pr=10426
@@ -29,4 +29,4 @@ npm run verify
 
 - Uses unauthenticated GitHub API calls.
 - Uses native browser SVG rendering for speed and selectable text.
-- For PR `ente-io/ente#10426`, rendering was checked against the Flutter prototype and matched closely enough to make this the default reviewer.
+- For PR `ente-io/ente#10426`, rendering was checked against the Flutter prototype and matched closely enough to make this the main reviewer.
