@@ -2,8 +2,8 @@ import {
   GitHubRateLimitError,
   adaptiveAuthIconColor,
   createGitHubPreviewService,
-} from './preview-service.mjs?v=20260514-no-default-pr';
-import { prInputFromSearch, urlWithPrInput } from './url-state.mjs?v=20260514-no-default-pr';
+} from './preview-service.mjs?v=20260514-no-default-pr-2';
+import { prInputFromSearch, urlWithPrInput } from './url-state.mjs?v=20260514-no-default-pr-2';
 
 const service = createGitHubPreviewService();
 let loadRun = 0;
