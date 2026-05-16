@@ -215,6 +215,113 @@ test('service emits file-stage state before metadata and SVG finish', async () =
   await iterator.return?.();
 });
 
+test('service loads before and after SVGs for modified icons', async () => {
+  const service = createGitHubPreviewService({
+    fetchImpl: async (url) => {
+      const value = url.toString();
+      if (value.endsWith('/pulls/10426')) return jsonResponse(prJson());
+      if (value.includes('/pulls/10426/files')) {
+        return jsonResponse([
+          {
+            filename: 'mobile/apps/auth/assets/custom-icons/icons/cove.svg',
+            status: 'modified',
+            raw_url: 'https://example.test/cove.svg',
+          },
+        ]);
+      }
+      if (value.endsWith('/custom-icons/_data/custom-icons.json')) {
+        return jsonResponse({ icons: [{ title: 'Cove Backup', slug: 'cove' }] });
+      }
+      if (value.includes('/aaaaaaaaaa') && value.endsWith('/custom-icons/icons/cove.svg')) {
+        return textResponse('<svg id="before"></svg>');
+      }
+      if (value.includes('/bbbbbbbbbb') && value.endsWith('/custom-icons/icons/cove.svg')) {
+        return textResponse('<svg id="after"></svg>');
+      }
+      return textResponse('not found', { status: 404 });
+    },
+  });
+
+  const finalResult = await finalWatchResult(service.watch('10426'));
+  const [item] = finalResult.items;
+  assert.equal(item.changeStatus, 'modified');
+  assert.equal(item.beforeSvgText, '<svg id="before"></svg>');
+  assert.equal(item.afterSvgText, '<svg id="after"></svg>');
+  assert.equal(item.svgText, '<svg id="after"></svg>');
+  assert.equal(item.isLoadingBeforeSvg, false);
+  assert.equal(item.isLoadingAfterSvg, false);
+});
+
+test('service keeps added icons as after-only previews', async () => {
+  const service = createGitHubPreviewService({
+    fetchImpl: async (url) => {
+      const value = url.toString();
+      if (value.endsWith('/pulls/10426')) return jsonResponse(prJson());
+      if (value.includes('/pulls/10426/files')) {
+        return jsonResponse([
+          {
+            filename: 'mobile/apps/auth/assets/custom-icons/icons/cove.svg',
+            status: 'added',
+            raw_url: 'https://example.test/cove.svg',
+          },
+        ]);
+      }
+      if (value.endsWith('/custom-icons/_data/custom-icons.json')) {
+        return jsonResponse({ icons: [{ title: 'Cove Backup', slug: 'cove' }] });
+      }
+      if (value.includes('/bbbbbbbbbb') && value.endsWith('/custom-icons/icons/cove.svg')) {
+        return textResponse('<svg id="after"></svg>');
+      }
+      return textResponse('not found', { status: 404 });
+    },
+  });
+
+  const finalResult = await finalWatchResult(service.watch('10426'));
+  const [item] = finalResult.items;
+  assert.equal(item.changeStatus, 'added');
+  assert.equal(item.beforeSvgText, null);
+  assert.equal(item.afterSvgText, '<svg id="after"></svg>');
+  assert.equal(item.isLoadingBeforeSvg, false);
+});
+
+test('service warns when modified icon before SVG cannot be fetched', async () => {
+  const service = createGitHubPreviewService({
+    fetchImpl: async (url) => {
+      const value = url.toString();
+      if (value.endsWith('/pulls/10426')) return jsonResponse(prJson());
+      if (value.includes('/pulls/10426/files')) {
+        return jsonResponse([
+          {
+            filename: 'mobile/apps/auth/assets/custom-icons/icons/cove.svg',
+            status: 'modified',
+            raw_url: 'https://example.test/cove.svg',
+          },
+        ]);
+      }
+      if (value.endsWith('/custom-icons/_data/custom-icons.json')) {
+        return jsonResponse({ icons: [{ title: 'Cove Backup', slug: 'cove' }] });
+      }
+      if (value.includes('/aaaaaaaaaa') && value.endsWith('/custom-icons/icons/cove.svg')) {
+        return textResponse('not found', { status: 404 });
+      }
+      if (value.includes('/bbbbbbbbbb') && value.endsWith('/custom-icons/icons/cove.svg')) {
+        return textResponse('<svg id="after"></svg>');
+      }
+      return textResponse('not found', { status: 404 });
+    },
+  });
+
+  const finalResult = await finalWatchResult(service.watch('10426'));
+  const [item] = finalResult.items;
+  assert.equal(item.beforeSvgText, null);
+  assert.equal(item.afterSvgText, '<svg id="after"></svg>');
+  assert.ok(
+    item.warnings.some((warning) =>
+      warning.startsWith('Before SVG content could not be fetched:'),
+    ),
+  );
+});
+
 test('rate limit responses are typed and include reset metadata', async () => {
   const resetSeconds = Date.UTC(2026, 4, 14, 12, 0, 0) / 1000;
   const service = createGitHubPreviewService({
@@ -285,4 +392,11 @@ function deferred() {
     reject = innerReject;
   });
   return { promise, resolve, reject };
+}
+
+async function finalWatchResult(watchIterable) {
+  for await (const state of watchIterable) {
+    if (state.result && !state.isLoading) return state.result;
+  }
+  throw new Error('Preview service did not emit a final result.');
 }

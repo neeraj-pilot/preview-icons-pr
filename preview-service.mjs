@@ -217,13 +217,13 @@ export function createGitHubPreviewService({
     try {
       return {
         key: job.key,
-        isExpected: job.isExpected,
+        kind: job.kind,
         svgText: await getText(job.url),
       };
     } catch (error) {
       return {
         key: job.key,
-        isExpected: job.isExpected,
+        kind: job.kind,
         errorMessage: error.toString(),
         rateLimitError: error instanceof GitHubRateLimitError ? error : null,
       };
@@ -268,6 +268,9 @@ export function createGitHubPreviewService({
       }
 
       const loadingChangedPaths = new Set(iconFiles.map((file) => file.filename));
+      const loadingBeforeChangedPaths = new Set(
+        iconFiles.filter(isModifiedFile).map((file) => file.filename),
+      );
       let result = {
         reference,
         title: typeof pr.title === 'string' ? pr.title : 'Untitled PR',
@@ -284,6 +287,9 @@ export function createGitHubPreviewService({
           svgTextByPath: new Map(),
           svgErrorsByPath: new Map(),
           loadingChangedPaths,
+          beforeSvgTextByPath: new Map(),
+          beforeSvgErrorsByPath: new Map(),
+          loadingBeforeChangedPaths,
           expectedSvgTextByKey: new Map(),
           expectedSvgErrorsByKey: new Map(),
           loadingExpectedKeys: new Set(),
@@ -332,6 +338,8 @@ export function createGitHubPreviewService({
       const loadingExpectedKeys = new Set(registryOnlyKeys(iconFiles, metadata));
       const svgTextByPath = new Map();
       const svgErrorsByPath = new Map();
+      const beforeSvgTextByPath = new Map();
+      const beforeSvgErrorsByPath = new Map();
       const expectedSvgTextByKey = new Map();
       const expectedSvgErrorsByKey = new Map();
 
@@ -343,6 +351,9 @@ export function createGitHubPreviewService({
           svgTextByPath,
           svgErrorsByPath,
           loadingChangedPaths,
+          beforeSvgTextByPath,
+          beforeSvgErrorsByPath,
+          loadingBeforeChangedPaths,
           expectedSvgTextByKey,
           expectedSvgErrorsByKey,
           loadingExpectedKeys,
@@ -354,12 +365,17 @@ export function createGitHubPreviewService({
       const jobs = [
         ...iconFiles.map((file) => ({
           key: file.filename,
-          isExpected: false,
+          kind: 'changed-after',
           url: rawContentUrl(reference, headSha, file.filename),
+        })),
+        ...iconFiles.filter(isModifiedFile).map((file) => ({
+          key: file.filename,
+          kind: 'changed-before',
+          url: rawContentUrl(reference, baseSha, file.filename),
         })),
         ...registryOnlyEntries(iconFiles, metadata).map((entry) => ({
           key: entry.sourceStemKey,
-          isExpected: true,
+          kind: 'expected-after',
           url: rawContentUrl(reference, headSha, entry.source.iconPath(entry.expectedAssetStem)),
         })),
       ];
@@ -379,11 +395,17 @@ export function createGitHubPreviewService({
         const { loaded, task } = await Promise.race(active);
         active.delete(task);
 
-        if (loaded.isExpected) {
+        if (loaded.kind === 'expected-after') {
           loadingExpectedKeys.delete(loaded.key);
           if (loaded.svgText != null) expectedSvgTextByKey.set(loaded.key, loaded.svgText);
           if (loaded.errorMessage != null) {
             expectedSvgErrorsByKey.set(loaded.key, loaded.errorMessage);
+          }
+        } else if (loaded.kind === 'changed-before') {
+          loadingBeforeChangedPaths.delete(loaded.key);
+          if (loaded.svgText != null) beforeSvgTextByPath.set(loaded.key, loaded.svgText);
+          if (loaded.errorMessage != null) {
+            beforeSvgErrorsByPath.set(loaded.key, loaded.errorMessage);
           }
         } else {
           loadingChangedPaths.delete(loaded.key);
@@ -400,6 +422,9 @@ export function createGitHubPreviewService({
             svgTextByPath,
             svgErrorsByPath,
             loadingChangedPaths,
+            beforeSvgTextByPath,
+            beforeSvgErrorsByPath,
+            loadingBeforeChangedPaths,
             expectedSvgTextByKey,
             expectedSvgErrorsByKey,
             loadingExpectedKeys,
@@ -530,6 +555,10 @@ export function isAuthIconMetadata(file) {
   return file.source != null && file.source.metadataPath === file.filename;
 }
 
+export function isModifiedFile(file) {
+  return file.status === 'modified';
+}
+
 export function fileStem(filename) {
   const name = filename.split('/').at(-1) ?? filename;
   return name.endsWith('.svg') ? name.slice(0, -4) : name;
@@ -622,6 +651,9 @@ export function buildPreviewItemsSnapshot({
   svgTextByPath,
   svgErrorsByPath,
   loadingChangedPaths,
+  beforeSvgTextByPath = new Map(),
+  beforeSvgErrorsByPath = new Map(),
+  loadingBeforeChangedPaths = new Set(),
   expectedSvgTextByKey,
   expectedSvgErrorsByKey,
   loadingExpectedKeys,
@@ -648,16 +680,29 @@ export function buildPreviewItemsSnapshot({
       warnings.push('Changed SVG has no matching auth registry entry.');
     }
     const svgError = svgErrorsByPath.get(file.filename);
-    if (svgError != null) warnings.push(`SVG content could not be fetched: ${svgError}`);
+    const beforeSvgError = beforeSvgErrorsByPath.get(file.filename);
+    const isModified = isModifiedFile(file);
+    if (beforeSvgError != null) {
+      warnings.push(`Before SVG content could not be fetched: ${beforeSvgError}`);
+    }
+    if (svgError != null) {
+      const label = isModified ? 'After SVG content' : 'SVG content';
+      warnings.push(`${label} could not be fetched: ${svgError}`);
+    }
     usedSvgKeys.add(key);
     items.push({
       source: file.source,
       displayTitle: entry?.title ?? file.stem,
       authPath: file.authPath,
       svgText: svgTextByPath.get(file.filename) ?? null,
+      beforeSvgText: beforeSvgTextByPath.get(file.filename) ?? null,
+      afterSvgText: svgTextByPath.get(file.filename) ?? null,
       metadata: entry ?? null,
       warnings,
       isLoadingSvg: loadingChangedPaths.has(file.filename),
+      isLoadingBeforeSvg: loadingBeforeChangedPaths.has(file.filename),
+      isLoadingAfterSvg: loadingChangedPaths.has(file.filename),
+      changeStatus: file.status,
       sortKey: `${file.source.index}:${entry?.title ?? file.stem}:0`,
     });
   }
@@ -681,6 +726,9 @@ export function buildPreviewItemsSnapshot({
       metadata: entry,
       warnings,
       isLoadingSvg: loadingExpectedKeys.has(entry.sourceStemKey),
+      isLoadingBeforeSvg: false,
+      isLoadingAfterSvg: loadingExpectedKeys.has(entry.sourceStemKey),
+      changeStatus: 'metadata',
       sortKey: `${entry.source.index}:${entry.title}:1`,
     });
   }

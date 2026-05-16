@@ -3,18 +3,18 @@ import {
   adaptiveAuthIconColor,
   createGitHubPreviewService,
   filterIconMetadata,
-} from './preview-service.mjs?v=20260516-preview-modes';
+} from './preview-service.mjs?v=20260516-edit-comparison';
 import {
   modes,
   stateFromSearch,
   urlWithState,
-} from './url-state.mjs?v=20260516-preview-modes';
+} from './url-state.mjs?v=20260516-edit-comparison';
 import {
   svgDataUrl,
   svgFrameDocument,
   validateHexInput,
   validateSvgText,
-} from './svg-renderer.mjs?v=20260516-preview-modes';
+} from './svg-renderer.mjs?v=20260516-edit-comparison';
 
 const EXISTING_ICON_LIMIT = 48;
 const SVG_CONCURRENCY = 6;
@@ -516,24 +516,62 @@ function iconCard(item) {
           copyButton(expectedPath, 'Copy expected path'),
         ])
       : null,
-    el('div', { className: 'variant-row' }, [
-      variantPreview(item, 'Light', 'light'),
-      variantPreview(item, 'Dark', 'dark'),
-    ]),
+    previewArea(item),
     warningArea(item),
   ]);
 }
 
-function variantPreview(item, label, variant) {
+function previewArea(item) {
+  if (item.changeStatus === 'modified') {
+    return el('div', { className: 'comparison-grid' }, [
+      variantPreview(item, 'Before Light', 'light', {
+        svgText: item.beforeSvgText,
+        isLoading: item.isLoadingBeforeSvg,
+      }),
+      variantPreview(item, 'Before Dark', 'dark', {
+        svgText: item.beforeSvgText,
+        isLoading: item.isLoadingBeforeSvg,
+      }),
+      variantPreview(item, 'After Light', 'light', {
+        svgText: item.afterSvgText,
+        isLoading: item.isLoadingAfterSvg,
+      }),
+      variantPreview(item, 'After Dark', 'dark', {
+        svgText: item.afterSvgText,
+        isLoading: item.isLoadingAfterSvg,
+      }),
+    ]);
+  }
+
+  return el('div', { className: 'variant-row' }, [
+    variantPreview(item, 'Light', 'light'),
+    variantPreview(item, 'Dark', 'dark'),
+  ]);
+}
+
+function variantPreview(
+  item,
+  label,
+  variant,
+  { svgText = item.svgText, isLoading = item.isLoadingSvg } = {},
+) {
   const tint = adaptiveAuthIconColor(item.metadata?.hex, variant);
   const isLight = variant === 'light';
   const children = [
     el('div', { className: 'variant-label' }, label),
-    el('div', { className: 'variant-body' }, [variantBody(item, tint, variant)]),
+    el('div', { className: 'variant-body' }, [
+      variantBody({ item, svgText, isLoading, tint, variant, label }),
+    ]),
     el(
       'div',
       { className: 'variant-caption' },
-      item.isLoadingSvg ? 'loading' : tint == null ? 'original colors' : tint.toUpperCase(),
+      isLoading
+        ? 'loading'
+        : svgText == null
+          ? 'unavailable'
+          : tint == null
+            ? 'original colors'
+            : tint.toUpperCase(),
     ),
   ];
   return el(
@@ -543,16 +581,16 @@ function variantPreview(item, label, variant) {
   );
 }
 
-function variantBody(item, tint, variant) {
-  if (item.isLoadingSvg) return el('div', { className: 'spinner small', ariaHidden: 'true' });
-  if (item.svgText == null) return el('div', { className: 'broken-icon', title: 'SVG unavailable' });
+function variantBody({ item, svgText, isLoading, tint, variant, label }) {
+  if (isLoading) return el('div', { className: 'spinner small', ariaHidden: 'true' });
+  if (svgText == null) return el('div', { className: 'broken-icon', title: 'SVG unavailable' });
 
-  const dataUrl = svgDataUrl(item.svgText);
-  if (tint == null) return svgFrame(item.svgText, item.displayTitle, variant);
+  const dataUrl = svgDataUrl(svgText);
+  if (tint == null) return svgFrame(svgText, `${item.displayTitle} ${label}`, variant);
 
   const mask = el('div', {
     className: 'svg-mask',
-    ariaLabel: item.displayTitle,
+    ariaLabel: `${item.displayTitle} ${label}`,
   });
   mask.style.backgroundColor = tint;
   mask.style.maskImage = `url("${dataUrl}")`;
