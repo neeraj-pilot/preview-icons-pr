@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check app.mjs && node --check preview-service.mjs && node --check url-state.mjs",
+    "check": "node --check app.mjs && node --check preview-service.mjs && node --check svg-renderer.mjs && node --check url-state.mjs",
     "test": "node --test preview-service.test.mjs",
     "verify": "npm run check && npm test"
   }

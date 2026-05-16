@@ -7,13 +7,16 @@ import {
   buildPreviewItemsSnapshot,
   changedFileFromJson,
   createGitHubPreviewService,
+  filterIconMetadata,
   iconMetadata,
   iconSourceStemKey,
   iconSources,
   normalizeSimpleIconName,
+  parseMetadata,
   parsePrReference,
 } from './preview-service.mjs';
-import { prInputFromSearch, urlWithPrInput } from './url-state.mjs';
+import { modes, prInputFromSearch, stateFromSearch, urlWithPrInput, urlWithState } from './url-state.mjs';
+import { svgFrameDocument, validateHexInput, validateSvgText } from './svg-renderer.mjs';
 
 test('parses GitHub PR references', () => {
   assert.equal(parsePrReference('10426').owner, 'ente-io');
@@ -39,6 +42,19 @@ test('reads and writes PR input in URL state', () => {
   assert.equal(
     urlWithPrInput('https://neeraj-pilot.github.io/preview-icons-pr/?pr=10426', ''),
     'https://neeraj-pilot.github.io/preview-icons-pr/',
+  );
+  assert.deepEqual(stateFromSearch('?mode=existing&q=proxmox'), {
+    mode: modes.existing,
+    prInput: '',
+    existingQuery: 'proxmox',
+    customHex: '',
+  });
+  assert.equal(
+    urlWithState('https://neeraj-pilot.github.io/preview-icons-pr/?pr=10426', {
+      mode: modes.custom,
+      customHex: 'ffffff',
+    }),
+    'https://neeraj-pilot.github.io/preview-icons-pr/?mode=custom&hex=ffffff',
   );
 });
 
@@ -103,6 +119,49 @@ test('adapts neutral colors like the Flutter app', () => {
   assert.equal(adaptiveAuthIconColor('000000', 'dark'), '#FFFFFF');
   assert.equal(adaptiveAuthIconColor('FFFFFF', 'light'), '#1C1C1E');
   assert.equal(adaptiveAuthIconColor('EC1C24', 'dark'), '#EC1C24');
+});
+
+test('searches custom metadata by title, slug, and alt names', () => {
+  const entries = parseMetadata(
+    iconSources.custom,
+    JSON.stringify({
+      icons: [
+        { title: 'Proxmox', altNames: ['PVE'] },
+        { title: 'Nintendo Account', slug: 'nintendo' },
+      ],
+    }),
+  );
+
+  assert.equal(filterIconMetadata(entries, 'pve')[0].title, 'Proxmox');
+  assert.equal(filterIconMetadata(entries, 'nintendo')[0].expectedAuthPath, 'assets/custom-icons/icons/nintendo.svg');
+});
+
+test('loads custom icon catalog and SVGs from main', async () => {
+  const service = createGitHubPreviewService({
+    fetchImpl: async (url) => {
+      const value = url.toString();
+      if (value.endsWith('/custom-icons/_data/custom-icons.json')) {
+        return jsonResponse({ icons: [{ title: 'Proxmox' }] });
+      }
+      if (value.endsWith('/custom-icons/icons/proxmox.svg')) {
+        return textResponse('<svg viewBox="0 0 1 1"></svg>');
+      }
+      return textResponse('not found', { status: 404 });
+    },
+  });
+
+  const [entry] = await service.fetchCustomIconCatalog();
+  assert.equal(entry.title, 'Proxmox');
+  assert.match(await service.fetchCustomIconSvg(entry), /<svg/);
+});
+
+test('validates custom SVG and hex inputs', () => {
+  assert.deepEqual(validateSvgText('', undefined), ['Paste an SVG to preview it.']);
+  assert.deepEqual(validateSvgText('not svg', undefined), ['Input must contain an <svg> element.']);
+  assert.deepEqual(validateSvgText('<svg viewBox="0 0 1 1"></svg>', undefined), []);
+  assert.deepEqual(validateHexInput('fff'), ['Hex color must be six hexadecimal characters.']);
+  assert.deepEqual(validateHexInput('#ffffff'), []);
+  assert.match(svgFrameDocument('<svg></svg>', 'dark'), /#121212/);
 });
 
 test('service emits file-stage state before metadata and SVG finish', async () => {

@@ -4,27 +4,56 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Native auth icon PR preview</title>
-    <link rel="stylesheet" href="./styles.css?v=20260516-inline-svg-frame" />
+    <link rel="stylesheet" href="./styles.css?v=20260516-preview-modes" />
   </head>
   <body>
     <header class="topbar">
       <form class="search-form" data-form>
-        <div class="app-mark" aria-hidden="true"></div>
-        <label class="field">
-          <span>GitHub PR URL or number</span>
-          <input
-            data-pr-input
-            autocomplete="off"
-            autocapitalize="off"
-            spellcheck="false"
-            type="text"
-          />
-        </label>
+        <div class="topbar-content">
+          <div class="mode-switch" role="tablist" aria-label="Preview mode">
+            <button type="button" role="tab" data-mode-button="pr" title="Preview PR changes">PR</button>
+            <button type="button" role="tab" data-mode-button="existing" title="Preview existing custom icons on main">Existing</button>
+            <button type="button" role="tab" data-mode-button="custom" title="Preview a custom SVG">Custom</button>
+          </div>
+          <div class="mode-fields">
+            <label class="field" data-mode-control="pr">
+              <span>GitHub PR URL or number</span>
+              <input
+                data-pr-input
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck="false"
+                type="text"
+              />
+            </label>
+            <label class="field" data-mode-control="existing" hidden>
+              <span>Search custom icons on main</span>
+              <input
+                data-existing-input
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck="false"
+                type="search"
+              />
+            </label>
+            <label class="field field-narrow" data-mode-control="custom" hidden>
+              <span>Optional registry hex</span>
+              <input
+                data-custom-hex-input
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck="false"
+                placeholder="E57000"
+                type="text"
+              />
+            </label>
+          </div>
+        </div>
         <button class="load-button" type="submit" data-load>Load</button>
         <span class="copy-status" data-copy-status role="status" aria-live="polite"></span>
       </form>
     </header>
     <main data-output></main>
-    <script type="module" src="./app.mjs?v=20260516-inline-svg-frame"></script>
+    <script type="module" src="./app.mjs?v=20260516-preview-modes"></script>
   </body>
 </html>

@@ -2,57 +2,167 @@ import {
   GitHubRateLimitError,
   adaptiveAuthIconColor,
   createGitHubPreviewService,
-} from './preview-service.mjs?v=20260514-no-default-pr-2';
-import { prInputFromSearch, urlWithPrInput } from './url-state.mjs?v=20260514-no-default-pr-2';
+  filterIconMetadata,
+} from './preview-service.mjs?v=20260516-preview-modes';
+import {
+  modes,
+  stateFromSearch,
+  urlWithState,
+} from './url-state.mjs?v=20260516-preview-modes';
+import {
+  svgDataUrl,
+  svgFrameDocument,
+  validateHexInput,
+  validateSvgText,
+} from './svg-renderer.mjs?v=20260516-preview-modes';
+
+const EXISTING_ICON_LIMIT = 48;
+const SVG_CONCURRENCY = 6;
+const customSource = { label: 'custom' };
+const customAuthPath = 'pasted SVG';
 
 const service = createGitHubPreviewService();
-let loadRun = 0;
-
 const form = document.querySelector('[data-form]');
-const input = document.querySelector('[data-pr-input]');
 const loadButton = document.querySelector('[data-load]');
 const output = document.querySelector('[data-output]');
+const prInput = document.querySelector('[data-pr-input]');
+const existingInput = document.querySelector('[data-existing-input]');
+const customHexInput = document.querySelector('[data-custom-hex-input]');
+const modeButtons = [...document.querySelectorAll('[data-mode-button]')];
+const modeControls = [...document.querySelectorAll('[data-mode-control]')];
 
-input.value = prInputFromSearch(window.location.search) || '';
-form.addEventListener('submit', (event) => {
-  event.preventDefault();
-  void loadPreview({ syncUrl: true });
-});
-window.addEventListener('popstate', () => {
-  input.value = prInputFromSearch(window.location.search) || '';
-  void loadPreview();
-});
+let appState = stateFromSearch(window.location.search);
+let loadRun = 0;
+let existingCatalogPromise = null;
+let customSvgText = '';
+let customSvgTextarea = null;
+let customPreviewSlot = null;
 
-void loadPreview();
+applyStateToControls(appState);
+renderModeChrome();
+wireEvents();
+void loadActiveMode();
 
-async function loadPreview({ syncUrl = false } = {}) {
-  const value = input.value.trim();
-  if (syncUrl) {
-    window.history.replaceState(null, '', urlWithPrInput(window.location.href, value));
+function wireEvents() {
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    void submitActiveMode();
+  });
+
+  for (const buttonNode of modeButtons) {
+    buttonNode.addEventListener('click', () => {
+      const mode = buttonNode.dataset.modeButton;
+      if (mode === appState.mode) return;
+      appState = { ...appState, mode };
+      renderModeChrome();
+      syncUrl();
+      void loadActiveMode();
+    });
   }
+
+  existingInput.addEventListener(
+    'input',
+    debounce(() => {
+      if (appState.mode !== modes.existing) return;
+      appState = { ...appState, existingQuery: existingInput.value.trim() };
+      syncUrl();
+      void loadExistingIcons();
+    }, 180),
+  );
+
+  customHexInput.addEventListener('input', () => {
+    if (appState.mode !== modes.custom) return;
+    appState = { ...appState, customHex: customHexInput.value.trim() };
+    syncUrl();
+    updateCustomPreview();
+  });
+
+  window.addEventListener('popstate', () => {
+    appState = stateFromSearch(window.location.search);
+    applyStateToControls(appState);
+    renderModeChrome();
+    void loadActiveMode();
+  });
+}
+
+async function submitActiveMode() {
+  if (appState.mode === modes.pr) {
+    appState = { ...appState, prInput: prInput.value.trim() };
+    syncUrl();
+    await loadPrPreview();
+    return;
+  }
+  if (appState.mode === modes.existing) {
+    appState = { ...appState, existingQuery: existingInput.value.trim() };
+    syncUrl();
+    await loadExistingIcons();
+    return;
+  }
+  appState = { ...appState, customHex: customHexInput.value.trim() };
+  syncUrl();
+  updateCustomPreview();
+}
+
+async function loadActiveMode() {
+  if (appState.mode === modes.pr) {
+    await loadPrPreview();
+    return;
+  }
+  if (appState.mode === modes.existing) {
+    await loadExistingIcons();
+    return;
+  }
+  renderCustomSvgTool();
+}
+
+function applyStateToControls(state) {
+  prInput.value = state.prInput ?? '';
+  existingInput.value = state.existingQuery ?? '';
+  customHexInput.value = state.customHex ?? '';
+}
+
+function renderModeChrome() {
+  for (const buttonNode of modeButtons) {
+    const isActive = buttonNode.dataset.modeButton === appState.mode;
+    buttonNode.classList.toggle('is-active', isActive);
+    buttonNode.setAttribute('aria-selected', `${isActive}`);
+  }
+  for (const control of modeControls) {
+    control.hidden = control.dataset.modeControl !== appState.mode;
+  }
+  loadButton.textContent =
+    appState.mode === modes.pr ? 'Load' : appState.mode === modes.existing ? 'Search' : 'Preview';
+}
+
+function syncUrl() {
+  window.history.replaceState(null, '', urlWithState(window.location.href, appState));
+}
+
+async function loadPrPreview() {
+  const value = prInput.value.trim();
   if (!value) {
     loadRun += 1;
     loadButton.disabled = false;
-    renderEmpty();
+    renderEmpty('Enter a GitHub PR URL or number to load icon previews.');
     return;
   }
 
   const runId = ++loadRun;
   loadButton.disabled = true;
-  input.blur();
-  renderLoading('Starting load...');
+  prInput.blur();
+  renderLoading('Starting PR load...');
 
   try {
     for await (const state of service.watch(value)) {
       if (runId !== loadRun) return;
-      renderState(state);
+      renderPrState(state);
     }
   } finally {
     if (runId === loadRun) loadButton.disabled = false;
   }
 }
 
-function renderState(state) {
+function renderPrState(state) {
   if (state.fatalError && !state.result) {
     renderError(state.fatalError, state.rateLimitError);
     return;
@@ -61,13 +171,290 @@ function renderState(state) {
     renderLoading(state.stage);
     return;
   }
-  renderResult(state);
+  const result = state.result;
+  const warningCount = countWarnings(result.items);
+  renderItemsPage({
+    title: `#${result.reference.number} ${result.title}`,
+    subtitle: `${result.reference.owner}/${result.reference.repo}  ${result.headSha.slice(0, 10)}`,
+    copyValue: result.headSha,
+    copyLabel: 'Copy head SHA',
+    metrics: [
+      ['Changed files', result.changedFileCount],
+      ['Preview items', result.items.length],
+      ['Warnings', warningCount],
+    ],
+    items: result.items,
+    emptyText: state.isLoading ? state.stage : 'No auth SVG icon changes found in this PR.',
+    isLoading: state.isLoading,
+    stage: state.stage,
+    globalWarnings: result.globalWarnings,
+    rateLimitError: state.rateLimitError,
+    gridLabel: 'Changed icon previews',
+  });
 }
 
-function renderEmpty() {
+async function loadExistingIcons() {
+  const query = existingInput.value.trim();
+  appState = { ...appState, existingQuery: query };
+  const runId = ++loadRun;
+  loadButton.disabled = true;
+  renderLoading('Loading custom icon catalog from main...');
+
+  try {
+    const entries = await loadExistingCatalog();
+    if (runId !== loadRun) return;
+
+    const matches = filterIconMetadata(entries, query, { limit: EXISTING_ICON_LIMIT });
+    const items = matches.map((entry) => itemFromMetadata(entry, { isLoadingSvg: true }));
+    renderExistingResult({
+      query,
+      totalCount: entries.length,
+      matchedCount: matches.length,
+      items,
+      isLoading: items.length > 0,
+      stage: 'Loading SVG previews...',
+    });
+
+    await loadExistingSvgs({ runId, matches, items, query, totalCount: entries.length });
+  } catch (error) {
+    if (runId === loadRun) renderError(error, error instanceof GitHubRateLimitError ? error : null);
+  } finally {
+    if (runId === loadRun) loadButton.disabled = false;
+  }
+}
+
+async function loadExistingCatalog() {
+  existingCatalogPromise ??= service.fetchCustomIconCatalog();
+  return existingCatalogPromise;
+}
+
+async function loadExistingSvgs({ runId, matches, items, query, totalCount }) {
+  const queue = [...matches.keys()];
+  const active = new Set();
+  const startJob = (index) => {
+    let task;
+    task = service
+      .fetchCustomIconSvg(matches[index])
+      .then((svgText) => ({ index, svgText, task }))
+      .catch((error) => ({ index, error, task }));
+    active.add(task);
+  };
+
+  while (queue.length > 0 || active.size > 0) {
+    while (queue.length > 0 && active.size < SVG_CONCURRENCY) {
+      startJob(queue.shift());
+    }
+    const loaded = await Promise.race(active);
+    active.delete(loaded.task);
+    if (runId !== loadRun) return;
+
+    const entry = matches[loaded.index];
+    const warnings = loaded.error ? [`SVG content could not be fetched: ${loaded.error}`] : [];
+    items[loaded.index] = itemFromMetadata(entry, {
+      svgText: loaded.svgText ?? null,
+      isLoadingSvg: false,
+      warnings,
+    });
+
+    renderExistingResult({
+      query,
+      totalCount,
+      matchedCount: matches.length,
+      items,
+      isLoading: queue.length > 0 || active.size > 0,
+      stage: queue.length === 0 && active.size === 0 ? 'Loaded' : 'Loading SVG previews...',
+    });
+  }
+}
+
+function renderExistingResult({ query, totalCount, matchedCount, items, isLoading, stage }) {
+  const subtitle = query
+    ? `${matchedCount} shown for "${query}" from ${totalCount} custom icons on main`
+    : `${matchedCount} shown from ${totalCount} custom icons on main`;
+  renderItemsPage({
+    title: 'Existing Custom Icons',
+    subtitle,
+    metrics: [
+      ['Catalog icons', totalCount],
+      ['Shown', matchedCount],
+      ['Warnings', countWarnings(items)],
+    ],
+    items,
+    emptyText: query ? 'No custom icons match this search.' : 'No custom icons found on main.',
+    isLoading,
+    stage,
+    gridLabel: 'Existing custom icon previews',
+  });
+}
+
+function renderCustomSvgTool() {
+  loadRun += 1;
+  loadButton.disabled = false;
+
+  customSvgTextarea = el('textarea', {
+    className: 'custom-svg-input',
+    placeholder: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">...</svg>',
+    spellcheck: false,
+  });
+  customSvgTextarea.value = customSvgText;
+  customSvgTextarea.addEventListener('input', () => {
+    customSvgText = customSvgTextarea.value;
+    updateCustomPreview();
+  });
+
+  const fileInput = el('input', {
+    className: 'file-input',
+    type: 'file',
+    accept: '.svg,image/svg+xml',
+  });
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    customSvgText = await file.text();
+    customSvgTextarea.value = customSvgText;
+    updateCustomPreview();
+  });
+
+  customPreviewSlot = el('div', { className: 'custom-preview-slot' });
+  const workspace = el('section', { className: 'custom-workspace' }, [
+    el('article', { className: 'custom-editor' }, [
+      el('h2', {}, 'Custom SVG'),
+      customSvgTextarea,
+      el('div', { className: 'editor-actions' }, [
+        el('span', { className: 'muted' }, 'Paste SVG or load a local .svg file.'),
+        fileInput,
+      ]),
+    ]),
+    customPreviewSlot,
+  ]);
+
+  output.replaceChildren(
+    summarySection({
+      title: 'Custom SVG Preview',
+      subtitle: 'Paste an SVG and optionally provide a registry hex color.',
+      metrics: [
+        ['Preview items', 1],
+        ['Warnings', 0],
+      ],
+    }),
+    workspace,
+  );
+  updateCustomPreview();
+}
+
+function updateCustomPreview() {
+  if (!customPreviewSlot) return;
+  const hex = customHexInput.value.trim();
+  appState = { ...appState, customHex: hex };
+  const svgWarnings = validateSvgText(customSvgText);
+  const hexWarnings = validateHexInput(hex);
+  const warnings = [...svgWarnings, ...hexWarnings];
+  const canRender = customSvgText.trim() && !svgWarnings.some((warning) => warning !== 'Paste an SVG to preview it.');
+  const hexForPreview = hexWarnings.length === 0 ? normalizeHex(hex) : null;
+  const item = {
+    source: customSource,
+    displayTitle: 'Custom SVG',
+    authPath: customAuthPath,
+    svgText: canRender ? customSvgText : null,
+    metadata: {
+      title: 'Custom SVG',
+      hex: hexForPreview,
+      expectedAuthPath: customAuthPath,
+    },
+    warnings,
+    isLoadingSvg: false,
+    sortKey: 'custom',
+  };
+  customPreviewSlot.replaceChildren(iconCard(item));
+  const summary = output.querySelector('[data-custom-warning-count]');
+  if (summary) summary.textContent = `${warnings.length}`;
+}
+
+function renderItemsPage({
+  title,
+  subtitle,
+  copyValue = null,
+  copyLabel = 'Copy',
+  metrics,
+  items,
+  emptyText,
+  isLoading = false,
+  stage = '',
+  globalWarnings = [],
+  rateLimitError = null,
+  gridLabel,
+}) {
+  const fragment = document.createDocumentFragment();
+  fragment.append(
+    summarySection({
+      title,
+      subtitle,
+      copyValue,
+      copyLabel,
+      metrics,
+      isLoading,
+      stage,
+    }),
+  );
+
+  if (rateLimitError) fragment.append(rateLimitBand(rateLimitError));
+  if (globalWarnings.length > 0) fragment.append(warningBand(globalWarnings));
+
+  if (items.length === 0) {
+    fragment.append(
+      el('section', { className: 'center-state' }, [
+        el('p', { className: 'muted' }, emptyText),
+      ]),
+    );
+  } else {
+    fragment.append(
+      el(
+        'section',
+        { className: 'icon-grid', ariaLabel: gridLabel },
+        items.map((item) => iconCard(item)),
+      ),
+    );
+  }
+
+  output.replaceChildren(fragment);
+}
+
+function summarySection({ title, subtitle, copyValue = null, copyLabel = 'Copy', metrics, isLoading, stage }) {
+  return el('section', { className: 'summary' }, [
+    el('div', { className: 'summary-title' }, [
+      el('h1', {}, title),
+      el('div', { className: 'sha-row' }, [
+        el('span', { className: 'muted selectable' }, subtitle),
+        copyValue ? copyButton(copyValue, copyLabel) : null,
+      ]),
+      isLoading
+        ? el('div', { className: 'stage-row' }, [
+            el('span', { className: 'tiny-spinner', ariaHidden: 'true' }),
+            el('span', { className: 'muted' }, stage),
+          ])
+        : null,
+    ]),
+    ...metrics.map(([label, value]) =>
+      metric(label, value, label === 'Warnings' && title === 'Custom SVG Preview'),
+    ),
+  ]);
+}
+
+function metric(label, value, isCustomWarningCount = false) {
+  return el('div', { className: 'metric' }, [
+    el(
+      'strong',
+      isCustomWarningCount ? { dataCustomWarningCount: 'true' } : {},
+      `${value}`,
+    ),
+    el('span', {}, label),
+  ]);
+}
+
+function renderEmpty(message) {
   output.replaceChildren(
     el('section', { className: 'center-state' }, [
-      el('p', { className: 'muted' }, 'Enter a GitHub PR URL or number to load icon previews.'),
+      el('p', { className: 'muted' }, message),
     ]),
   );
 }
@@ -82,84 +469,14 @@ function renderLoading(label) {
 }
 
 function renderError(error, rateLimitError) {
-  const message = rateLimitError
-    ? formatRateLimit(rateLimitError)
-    : `${error}`;
+  const message = rateLimitError ? formatRateLimit(rateLimitError) : `${error}`;
   output.replaceChildren(
     el('section', { className: 'center-state error-state' }, [
       el('div', { className: 'large-status-icon', ariaHidden: 'true' }, '!'),
       el('p', { className: 'error-text' }, message),
-      button('Retry', 'retry', () => void loadPreview()),
+      button('Retry', 'retry', () => void loadActiveMode()),
     ]),
   );
-}
-
-function renderResult(state) {
-  const result = state.result;
-  const warningCount = result.items.reduce((count, item) => count + item.warnings.length, 0);
-  const fragment = document.createDocumentFragment();
-
-  fragment.append(
-    el('section', { className: 'summary' }, [
-      el('div', { className: 'summary-title' }, [
-        el('h1', {}, `#${result.reference.number} ${result.title}`),
-        el('div', { className: 'sha-row' }, [
-          el(
-            'span',
-            { className: 'muted selectable' },
-            `${result.reference.owner}/${result.reference.repo}  ${result.headSha.slice(0, 10)}`,
-          ),
-          copyButton(result.headSha, 'Copy head SHA'),
-        ]),
-        state.isLoading
-          ? el('div', { className: 'stage-row' }, [
-              el('span', { className: 'tiny-spinner', ariaHidden: 'true' }),
-              el('span', { className: 'muted' }, state.stage),
-            ])
-          : null,
-      ]),
-      metric('Changed files', result.changedFileCount),
-      metric('Preview items', result.items.length),
-      metric('Warnings', warningCount),
-    ]),
-  );
-
-  if (state.rateLimitError) {
-    fragment.append(rateLimitBand(state.rateLimitError));
-  }
-
-  if (result.globalWarnings.length > 0) {
-    fragment.append(warningBand(result.globalWarnings));
-  }
-
-  if (result.items.length === 0) {
-    fragment.append(
-      el('section', { className: 'center-state' }, [
-        el(
-          'p',
-          { className: 'muted' },
-          state.isLoading ? state.stage : 'No auth SVG icon changes found in this PR.',
-        ),
-      ]),
-    );
-  } else {
-    fragment.append(
-      el(
-        'section',
-        { className: 'icon-grid', ariaLabel: 'Changed icon previews' },
-        result.items.map((item) => iconCard(item)),
-      ),
-    );
-  }
-
-  output.replaceChildren(fragment);
-}
-
-function metric(label, value) {
-  return el('div', { className: 'metric' }, [
-    el('strong', {}, `${value}`),
-    el('span', {}, label),
-  ]);
 }
 
 function warningBand(warnings) {
@@ -178,7 +495,7 @@ function rateLimitBand(error) {
   return el('section', { className: 'rate-band' }, [
     el('strong', {}, 'GitHub API rate limit exceeded'),
     el('span', { className: 'selectable' }, formatRateLimit(error)),
-    button('Retry', 'retry', () => void loadPreview()),
+    button('Retry', 'retry', () => void loadActiveMode()),
   ]);
 }
 
@@ -231,9 +548,7 @@ function variantBody(item, tint, variant) {
   if (item.svgText == null) return el('div', { className: 'broken-icon', title: 'SVG unavailable' });
 
   const dataUrl = svgDataUrl(item.svgText);
-  if (tint == null) {
-    return svgFrame(item.svgText, item.displayTitle, variant);
-  }
+  if (tint == null) return svgFrame(item.svgText, item.displayTitle, variant);
 
   const mask = el('div', {
     className: 'svg-mask',
@@ -256,43 +571,6 @@ function svgFrame(svgText, title, variant) {
   return frame;
 }
 
-function svgFrameDocument(svgText, variant) {
-  const background = variant === 'light' ? '#ffffff' : '#121212';
-  const normalizedSvg = svgText
-    .replace(/^\s*<\?xml[^>]*>\s*/i, '')
-    .replace(/^\s*<!doctype[^>]*>\s*/i, '');
-  return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <style>
-      html,
-      body {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        overflow: hidden;
-        background: ${background};
-      }
-
-      body {
-        display: grid;
-        place-items: center;
-      }
-
-      svg {
-        display: block;
-        width: 82px !important;
-        height: 82px !important;
-        max-width: 82px;
-        max-height: 82px;
-      }
-    </style>
-  </head>
-  <body>${normalizedSvg}</body>
-</html>`;
-}
-
 function warningArea(item) {
   if (item.warnings.length === 0) {
     const message = item.metadata
@@ -305,7 +583,7 @@ function warningArea(item) {
   return el(
     'div',
     { className: 'card-foot warning-list' },
-    item.warnings.slice(0, 3).map((warning) =>
+    item.warnings.slice(0, 4).map((warning) =>
       el('div', { className: 'warning-item' }, [
         el('span', { className: 'warning-mark', ariaHidden: 'true' }, '!'),
         el('span', { className: 'selectable' }, warning),
@@ -315,6 +593,23 @@ function warningArea(item) {
   );
 }
 
+function itemFromMetadata(entry, { svgText = null, isLoadingSvg = false, warnings = [] } = {}) {
+  return {
+    source: entry.source,
+    displayTitle: entry.title,
+    authPath: entry.expectedAuthPath,
+    svgText,
+    metadata: entry,
+    warnings,
+    isLoadingSvg,
+    sortKey: entry.title,
+  };
+}
+
+function countWarnings(items) {
+  return items.reduce((count, item) => count + item.warnings.length, 0);
+}
+
 function formatRateLimit(error) {
   if (error instanceof GitHubRateLimitError) {
     return `GitHub API rate limit exceeded. ${error.remainingLabel}, ${error.resetLabel}.`;
@@ -322,8 +617,9 @@ function formatRateLimit(error) {
   return 'GitHub API rate limit exceeded.';
 }
 
-function svgDataUrl(svgText) {
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`;
+function normalizeHex(hex) {
+  const value = `${hex ?? ''}`.replace(/^#/, '').trim();
+  return /^[0-9a-fA-F]{6}$/.test(value) ? value.toUpperCase() : null;
 }
 
 function copyButton(value, label) {
@@ -366,6 +662,14 @@ function flashCopyStatus(message) {
   }, 1200);
 }
 
+function debounce(fn, delayMs) {
+  let timeout = null;
+  return (...args) => {
+    window.clearTimeout(timeout);
+    timeout = window.setTimeout(() => fn(...args), delayMs);
+  };
+}
+
 function el(tagName, props = {}, children = []) {
   const node = document.createElement(tagName);
   for (const [key, value] of Object.entries(props)) {
@@ -373,7 +677,13 @@ function el(tagName, props = {}, children = []) {
     if (key === 'className') node.className = value;
     else if (key === 'ariaLabel') node.setAttribute('aria-label', value);
     else if (key === 'ariaHidden') node.setAttribute('aria-hidden', `${value}`);
-    else node[key] = value;
+    else if (key.startsWith('data') && key.length > 4) {
+      const dataName = key
+        .slice(4)
+        .replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)
+        .replace(/^-/, '');
+      node.setAttribute(`data-${dataName}`, value);
+    } else node[key] = value;
   }
 
   const childList = Array.isArray(children) ? children : [children];

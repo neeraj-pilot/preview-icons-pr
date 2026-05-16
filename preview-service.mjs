@@ -1,5 +1,6 @@
 export const AUTH_ROOT = 'mobile/apps/auth/assets';
 export const SVG_CONCURRENCY = 6;
+export const ENTE_MAIN_REFERENCE = { owner: 'ente-io', repo: 'ente' };
 
 export const iconSources = {
   custom: {
@@ -229,6 +230,15 @@ export function createGitHubPreviewService({
     }
   }
 
+  async function fetchCustomIconCatalog(ref = 'main') {
+    const rawJson = await getText(rawContentUrl(ENTE_MAIN_REFERENCE, ref, iconSources.custom.metadataPath));
+    return parseMetadata(iconSources.custom, rawJson);
+  }
+
+  async function fetchCustomIconSvg(entry, ref = 'main') {
+    return getText(rawContentUrl(ENTE_MAIN_REFERENCE, ref, entry.source.iconPath(entry.expectedAssetStem)));
+  }
+
   async function* watch(input) {
     yield loadingState('Fetching PR metadata...');
 
@@ -413,6 +423,8 @@ export function createGitHubPreviewService({
   }
 
   return {
+    fetchCustomIconCatalog,
+    fetchCustomIconSvg,
     watch,
     getJson,
     getText,
@@ -550,12 +562,13 @@ export function parseMetadata(source, rawJson) {
         title: `${record.title ?? ''}`,
         slug: record.slug == null ? null : `${record.slug}`,
         hex: record.hex == null ? null : `${record.hex}`,
+        altNames: Array.isArray(record.altNames) ? record.altNames.map((name) => `${name}`) : [],
       }),
     )
     .filter((entry) => entry.title.length > 0);
 }
 
-export function iconMetadata({ source, title, slug, hex }) {
+export function iconMetadata({ source, title, slug, hex, altNames = [] }) {
   const titleKey = title.replaceAll(' ', '').toLowerCase();
   const expectedAssetStem =
     source.name === 'custom' ? (slug ?? titleKey) : normalizeSimpleIconName(titleKey);
@@ -567,12 +580,35 @@ export function iconMetadata({ source, title, slug, hex }) {
     title,
     slug,
     hex,
+    altNames,
     titleKey,
     expectedAssetStem,
     expectedAuthPath,
     sourceStemKey,
-    fingerprint: `${title}|${slug ?? ''}|${hex ?? ''}`,
+    fingerprint: `${title}|${slug ?? ''}|${hex ?? ''}|${altNames.join('|')}`,
   };
+}
+
+export function filterIconMetadata(entries, query, { limit = 60 } = {}) {
+  const normalizedQuery = normalizeSearchText(query);
+  const sortedEntries = [...entries].sort((left, right) => ordinalCompare(left.title, right.title));
+  const matches = normalizedQuery
+    ? sortedEntries.filter((entry) => iconSearchText(entry).includes(normalizedQuery))
+    : sortedEntries;
+  return matches.slice(0, limit);
+}
+
+export function iconSearchText(entry) {
+  return normalizeSearchText([entry.title, entry.slug, ...entry.altNames].filter(Boolean).join(' '));
+}
+
+export function normalizeSearchText(input) {
+  return `${input ?? ''}`
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 export function changedMetadataEntries(baseEntries, headEntries) {
