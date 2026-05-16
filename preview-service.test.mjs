@@ -8,12 +8,15 @@ import {
   changedFileFromJson,
   createGitHubPreviewService,
   filterIconMetadata,
+  formatIconSize,
   iconMetadata,
   iconSourceStemKey,
   iconSources,
   normalizeSimpleIconName,
+  oversizedIconWarning,
   parseMetadata,
   parsePrReference,
+  svgByteSize,
 } from './preview-service.mjs';
 import { modes, prInputFromSearch, stateFromSearch, urlWithPrInput, urlWithState } from './url-state.mjs';
 import { svgFrameDocument, validateHexInput, validateSvgText } from './svg-renderer.mjs';
@@ -164,6 +167,36 @@ test('validates custom SVG and hex inputs', () => {
   assert.match(svgFrameDocument('<svg></svg>', 'dark'), /#121212/);
 });
 
+test('formats SVG byte sizes and mirrors auth icon size lint exemptions', () => {
+  assert.equal(svgByteSize('<svg>€</svg>'), 14);
+  assert.equal(formatIconSize(640), '640 B');
+  assert.equal(formatIconSize(1536), '1.5 KB');
+  assert.equal(
+    oversizedIconWarning({
+      authPath: 'assets/custom-icons/icons/large.svg',
+      bytes: 20481,
+      label: 'SVG',
+    }),
+    'SVG size is 20.1 KB, above auth linter limit of 20 KB.',
+  );
+  assert.equal(
+    oversizedIconWarning({
+      authPath: 'assets/custom-icons/icons/bbs_nga.svg',
+      bytes: 20481,
+      label: 'SVG',
+    }),
+    null,
+  );
+  assert.equal(
+    oversizedIconWarning({
+      authPath: 'assets/simple-icons/icons/large.svg',
+      bytes: 20481,
+      label: 'SVG',
+    }),
+    null,
+  );
+});
+
 test('service emits file-stage state before metadata and SVG finish', async () => {
   const metadataGate = deferred();
   const service = createGitHubPreviewService({
@@ -248,6 +281,8 @@ test('service loads before and after SVGs for modified icons', async () => {
   assert.equal(item.beforeSvgText, '<svg id="before"></svg>');
   assert.equal(item.afterSvgText, '<svg id="after"></svg>');
   assert.equal(item.svgText, '<svg id="after"></svg>');
+  assert.equal(item.beforeSvgSizeBytes, 23);
+  assert.equal(item.afterSvgSizeBytes, 22);
   assert.equal(item.isLoadingBeforeSvg, false);
   assert.equal(item.isLoadingAfterSvg, false);
 });
@@ -281,7 +316,39 @@ test('service keeps added icons as after-only previews', async () => {
   assert.equal(item.changeStatus, 'added');
   assert.equal(item.beforeSvgText, null);
   assert.equal(item.afterSvgText, '<svg id="after"></svg>');
+  assert.equal(item.svgSizeBytes, 22);
   assert.equal(item.isLoadingBeforeSvg, false);
+});
+
+test('service warns when changed custom icon exceeds auth lint size limit', async () => {
+  const oversizedSvg = `<svg>${'x'.repeat(20470)}</svg>`;
+  const service = createGitHubPreviewService({
+    fetchImpl: async (url) => {
+      const value = url.toString();
+      if (value.endsWith('/pulls/10426')) return jsonResponse(prJson());
+      if (value.includes('/pulls/10426/files')) {
+        return jsonResponse([
+          {
+            filename: 'mobile/apps/auth/assets/custom-icons/icons/cove.svg',
+            status: 'added',
+            raw_url: 'https://example.test/cove.svg',
+          },
+        ]);
+      }
+      if (value.endsWith('/custom-icons/_data/custom-icons.json')) {
+        return jsonResponse({ icons: [{ title: 'Cove Backup', slug: 'cove' }] });
+      }
+      if (value.includes('/bbbbbbbbbb') && value.endsWith('/custom-icons/icons/cove.svg')) {
+        return textResponse(oversizedSvg);
+      }
+      return textResponse('not found', { status: 404 });
+    },
+  });
+
+  const finalResult = await finalWatchResult(service.watch('10426'));
+  const [item] = finalResult.items;
+  assert.equal(item.svgSizeBytes, 20481);
+  assert.ok(item.warnings.includes('SVG size is 20.1 KB, above auth linter limit of 20 KB.'));
 });
 
 test('service warns when modified icon before SVG cannot be fetched', async () => {

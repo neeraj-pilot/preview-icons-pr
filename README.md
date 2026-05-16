@@ -2,7 +2,7 @@
 
 Fast browser-native preview for Ente auth icons.
 
-The app can preview GitHub PR icon changes, search existing custom icons from `ente-io/ente/main`, and render pasted SVG markup with an optional registry hex color. It shows light/dark previews, before/after comparisons for edited PR icons, highlights registry/file mismatches, keeps card-level SVG fetch errors local, and shows GitHub rate-limit details when available.
+The app can preview GitHub PR icon changes, search existing custom icons from `ente-io/ente/main`, and render pasted SVG markup with an optional registry hex color. It shows light/dark previews, before/after comparisons for edited PR icons, available SVG sizes, oversized custom-icon warnings based on the auth lint limit, registry/file mismatches, card-level SVG fetch errors, and GitHub rate-limit details when available.
 
 ## Local Run
 

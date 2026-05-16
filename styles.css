@@ -398,7 +398,6 @@ code {
 
 .icon-card {
   display: grid;
-  grid-template-rows: auto auto auto minmax(158px, 1fr) 72px;
   min-height: 372px;
   padding: 14px;
   border: 1px solid #e0e3e8;
@@ -444,11 +443,19 @@ code {
   font-size: 12px;
 }
 
+.size-row {
+  min-height: 19px;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .path-row code,
 .expected-row span,
 .sha-row span,
 .copy-line span,
-.warning-item span:not(.warning-mark) {
+.warning-item span:not(.warning-mark),
+.size-row {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -701,11 +708,6 @@ code {
 
   .load-button {
     justify-self: start;
-  }
-
-  .icon-card {
-    grid-template-rows: auto auto auto auto auto;
-    min-height: auto;
   }
 
   .variant-row,

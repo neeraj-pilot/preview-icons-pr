@@ -3,18 +3,21 @@ import {
   adaptiveAuthIconColor,
   createGitHubPreviewService,
   filterIconMetadata,
-} from './preview-service.mjs?v=20260516-edit-comparison';
+  formatIconSize,
+  oversizedIconWarning,
+  svgByteSize,
+} from './preview-service.mjs?v=20260516-icon-sizes';
 import {
   modes,
   stateFromSearch,
   urlWithState,
-} from './url-state.mjs?v=20260516-edit-comparison';
+} from './url-state.mjs?v=20260516-icon-sizes';
 import {
   svgDataUrl,
   svgFrameDocument,
   validateHexInput,
   validateSvgText,
-} from './svg-renderer.mjs?v=20260516-edit-comparison';
+} from './svg-renderer.mjs?v=20260516-icon-sizes';
 
 const EXISTING_ICON_LIMIT = 48;
 const SVG_CONCURRENCY = 6;
@@ -348,14 +351,22 @@ function updateCustomPreview() {
   appState = { ...appState, customHex: hex };
   const svgWarnings = validateSvgText(customSvgText);
   const hexWarnings = validateHexInput(hex);
-  const warnings = [...svgWarnings, ...hexWarnings];
   const canRender = customSvgText.trim() && !svgWarnings.some((warning) => warning !== 'Paste an SVG to preview it.');
+  const svgSizeBytes = canRender ? svgByteSize(customSvgText) : null;
+  const sizeWarning = oversizedIconWarning({
+    authPath: customAuthPath,
+    bytes: svgSizeBytes,
+    label: 'SVG',
+    force: true,
+  });
+  const warnings = [...svgWarnings, ...hexWarnings, sizeWarning].filter(Boolean);
   const hexForPreview = hexWarnings.length === 0 ? normalizeHex(hex) : null;
   const item = {
     source: customSource,
     displayTitle: 'Custom SVG',
     authPath: customAuthPath,
     svgText: canRender ? customSvgText : null,
+    svgSizeBytes,
     metadata: {
       title: 'Custom SVG',
       hex: hexForPreview,
@@ -516,9 +527,27 @@ function iconCard(item) {
           copyButton(expectedPath, 'Copy expected path'),
         ])
       : null,
+    sizeLine(item),
     previewArea(item),
     warningArea(item),
   ]);
+}
+
+function sizeLine(item) {
+  const label = sizeSummary(item);
+  if (!label) return null;
+  return el('div', { className: 'size-row' }, label);
+}
+
+function sizeSummary(item) {
+  if (item.changeStatus === 'modified') {
+    const before = formatIconSize(item.beforeSvgSizeBytes) ?? 'unavailable';
+    const after = formatIconSize(item.afterSvgSizeBytes) ?? 'unavailable';
+    return `Size: before ${before}, after ${after}`;
+  }
+
+  const size = formatIconSize(item.svgSizeBytes);
+  return size ? `Size: ${size}` : '';
 }
 
 function previewArea(item) {
@@ -632,13 +661,20 @@ function warningArea(item) {
 }
 
 function itemFromMetadata(entry, { svgText = null, isLoadingSvg = false, warnings = [] } = {}) {
+  const svgSizeBytes = svgByteSize(svgText);
+  const sizeWarning = oversizedIconWarning({
+    authPath: entry.expectedAuthPath,
+    bytes: svgSizeBytes,
+    label: 'SVG',
+  });
   return {
     source: entry.source,
     displayTitle: entry.title,
     authPath: entry.expectedAuthPath,
     svgText,
+    svgSizeBytes,
     metadata: entry,
-    warnings,
+    warnings: sizeWarning == null ? warnings : [...warnings, sizeWarning],
     isLoadingSvg,
     sortKey: entry.title,
   };

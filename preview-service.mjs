@@ -1,6 +1,11 @@
 export const AUTH_ROOT = 'mobile/apps/auth/assets';
 export const SVG_CONCURRENCY = 6;
 export const ENTE_MAIN_REFERENCE = { owner: 'ente-io', repo: 'ente' };
+export const AUTH_ICON_SIZE_LIMIT_BYTES = 20 * 1024;
+export const AUTH_ICON_SIZE_LIMIT_LABEL = '20 KB';
+export const AUTH_ICON_SIZE_EXEMPT_AUTH_PATHS = new Set([
+  'assets/custom-icons/icons/bbs_nga.svg',
+]);
 
 export const iconSources = {
   custom: {
@@ -559,6 +564,32 @@ export function isModifiedFile(file) {
   return file.status === 'modified';
 }
 
+export function svgByteSize(svgText) {
+  if (svgText == null) return null;
+  return new TextEncoder().encode(`${svgText}`).length;
+}
+
+export function formatIconSize(bytes) {
+  if (bytes == null) return null;
+  if (bytes < 1024) return `${bytes} B`;
+  const kib = Math.ceil((bytes / 1024) * 10) / 10;
+  return Number.isInteger(kib) ? `${kib} KB` : `${kib.toFixed(1)} KB`;
+}
+
+export function oversizedIconWarning({ authPath, bytes, label = 'SVG', force = false }) {
+  if (bytes == null || bytes <= AUTH_ICON_SIZE_LIMIT_BYTES) return null;
+  if (!force && !isCustomAuthIconSizeLinted(authPath)) return null;
+  return `${label} size is ${formatIconSize(bytes)}, above auth linter limit of ${AUTH_ICON_SIZE_LIMIT_LABEL}.`;
+}
+
+export function isCustomAuthIconSizeLinted(authPath) {
+  return (
+    `${authPath ?? ''}`.startsWith('assets/custom-icons/icons/') &&
+    `${authPath ?? ''}`.endsWith('.svg') &&
+    !AUTH_ICON_SIZE_EXEMPT_AUTH_PATHS.has(authPath)
+  );
+}
+
 export function fileStem(filename) {
   const name = filename.split('/').at(-1) ?? filename;
   return name.endsWith('.svg') ? name.slice(0, -4) : name;
@@ -682,6 +713,10 @@ export function buildPreviewItemsSnapshot({
     const svgError = svgErrorsByPath.get(file.filename);
     const beforeSvgError = beforeSvgErrorsByPath.get(file.filename);
     const isModified = isModifiedFile(file);
+    const beforeSvgText = beforeSvgTextByPath.get(file.filename) ?? null;
+    const afterSvgText = svgTextByPath.get(file.filename) ?? null;
+    const beforeSvgSizeBytes = svgByteSize(beforeSvgText);
+    const afterSvgSizeBytes = svgByteSize(afterSvgText);
     if (beforeSvgError != null) {
       warnings.push(`Before SVG content could not be fetched: ${beforeSvgError}`);
     }
@@ -689,14 +724,23 @@ export function buildPreviewItemsSnapshot({
       const label = isModified ? 'After SVG content' : 'SVG content';
       warnings.push(`${label} could not be fetched: ${svgError}`);
     }
+    const sizeWarning = oversizedIconWarning({
+      authPath: file.authPath,
+      bytes: afterSvgSizeBytes,
+      label: isModified ? 'After SVG' : 'SVG',
+    });
+    if (sizeWarning != null) warnings.push(sizeWarning);
     usedSvgKeys.add(key);
     items.push({
       source: file.source,
       displayTitle: entry?.title ?? file.stem,
       authPath: file.authPath,
-      svgText: svgTextByPath.get(file.filename) ?? null,
-      beforeSvgText: beforeSvgTextByPath.get(file.filename) ?? null,
-      afterSvgText: svgTextByPath.get(file.filename) ?? null,
+      svgText: afterSvgText,
+      svgSizeBytes: afterSvgSizeBytes,
+      beforeSvgText,
+      beforeSvgSizeBytes,
+      afterSvgText,
+      afterSvgSizeBytes,
       metadata: entry ?? null,
       warnings,
       isLoadingSvg: loadingChangedPaths.has(file.filename),
@@ -718,11 +762,20 @@ export function buildPreviewItemsSnapshot({
         warnings.push(`Expected SVG probe failed: ${expectedError}`);
       }
     }
+    const svgText = expectedSvgTextByKey.get(entry.sourceStemKey) ?? null;
+    const svgSizeBytes = svgByteSize(svgText);
+    const sizeWarning = oversizedIconWarning({
+      authPath: entry.expectedAuthPath,
+      bytes: svgSizeBytes,
+      label: 'SVG',
+    });
+    if (sizeWarning != null) warnings.push(sizeWarning);
     items.push({
       source: entry.source,
       displayTitle: entry.title,
       authPath: entry.expectedAuthPath,
-      svgText: expectedSvgTextByKey.get(entry.sourceStemKey) ?? null,
+      svgText,
+      svgSizeBytes,
       metadata: entry,
       warnings,
       isLoadingSvg: loadingExpectedKeys.has(entry.sourceStemKey),
