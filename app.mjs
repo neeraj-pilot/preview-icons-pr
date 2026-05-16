@@ -212,7 +212,7 @@ function variantPreview(item, label, variant) {
   const isLight = variant === 'light';
   const children = [
     el('div', { className: 'variant-label' }, label),
-    el('div', { className: 'variant-body' }, [variantBody(item, tint)]),
+    el('div', { className: 'variant-body' }, [variantBody(item, tint, variant)]),
     el(
       'div',
       { className: 'variant-caption' },
@@ -226,17 +226,13 @@ function variantPreview(item, label, variant) {
   );
 }
 
-function variantBody(item, tint) {
+function variantBody(item, tint, variant) {
   if (item.isLoadingSvg) return el('div', { className: 'spinner small', ariaHidden: 'true' });
   if (item.svgText == null) return el('div', { className: 'broken-icon', title: 'SVG unavailable' });
 
   const dataUrl = svgDataUrl(item.svgText);
   if (tint == null) {
-    return el('img', {
-      className: 'svg-preview',
-      alt: item.displayTitle,
-      src: dataUrl,
-    });
+    return svgFrame(item.svgText, item.displayTitle, variant);
   }
 
   const mask = el('div', {
@@ -247,6 +243,54 @@ function variantBody(item, tint) {
   mask.style.maskImage = `url("${dataUrl}")`;
   mask.style.webkitMaskImage = `url("${dataUrl}")`;
   return mask;
+}
+
+function svgFrame(svgText, title, variant) {
+  const frame = document.createElement('iframe');
+  frame.className = 'svg-frame';
+  frame.title = title;
+  frame.setAttribute('sandbox', '');
+  frame.setAttribute('scrolling', 'no');
+  frame.setAttribute('referrerpolicy', 'no-referrer');
+  frame.srcdoc = svgFrameDocument(svgText, variant);
+  return frame;
+}
+
+function svgFrameDocument(svgText, variant) {
+  const background = variant === 'light' ? '#ffffff' : '#121212';
+  const normalizedSvg = svgText
+    .replace(/^\s*<\?xml[^>]*>\s*/i, '')
+    .replace(/^\s*<!doctype[^>]*>\s*/i, '');
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <style>
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: ${background};
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+      }
+
+      svg {
+        display: block;
+        width: 82px !important;
+        height: 82px !important;
+        max-width: 82px;
+        max-height: 82px;
+      }
+    </style>
+  </head>
+  <body>${normalizedSvg}</body>
+</html>`;
 }
 
 function warningArea(item) {
